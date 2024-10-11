@@ -31,26 +31,26 @@ class CvdCmdlistHandler : public CvdServerHandler {
  public:
   CvdCmdlistHandler(CommandSequenceExecutor& executor) : executor_(executor) {}
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return (invocation.command == "cmd-list");
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
     cvd::Response response;
     response.mutable_command_response();  // Sets oneof member
     response.mutable_status()->set_code(cvd::Status::OK);
 
     CF_EXPECT(CanHandle(request));
 
-    auto [subcmd, subcmd_args] = ParseInvocation(request.Message());
+    auto [subcmd, subcmd_args] = ParseInvocation(request);
     const auto subcmds = executor_.CmdList();
 
     std::vector<std::string> subcmds_vec{subcmds.begin(), subcmds.end()};
     const auto subcmds_str = android::base::Join(subcmds_vec, ",");
     Json::Value subcmd_info;
     subcmd_info["subcmd"] = subcmds_str;
-    request.Out() << subcmd_info.toStyledString();
+    std::cout << subcmd_info.toStyledString();
     return response;
   }
 

@@ -19,7 +19,6 @@
 #include "build/version.h"
 #include "cuttlefish/host/commands/cvd/cvd_server.pb.h"
 
-#include "common/libs/fs/shared_buf.h"
 #include "common/libs/utils/proto.h"
 #include "common/libs/utils/result.h"
 #include "host/commands/cvd/common_utils.h"
@@ -39,21 +38,22 @@ class CvdVersionHandler : public CvdServerHandler {
  public:
   CvdVersionHandler() = default;
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return "version" == invocation.command;
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
     CF_EXPECT(CanHandle(request));
 
-    cvd::Version version;
-    version.set_major(cvd::kVersionMajor);
-    version.set_minor(cvd::kVersionMinor);
-    version.set_build(android::build::GetBuildNumber());
-    version.set_crc32(FileCrc(kServerExecPath));
+    fmt::print(std::cout, "major: {}\n", cvd::kVersionMajor);
+    fmt::print(std::cout, "minor: {}\n", cvd::kVersionMinor);
 
-    fmt::print(request.Out(), "{}", version);
+    std::string build = android::build::GetBuildNumber();
+    if (!build.empty()) {
+      fmt::print(std::cout, "build: {}\n", build);
+    }
+    fmt::print(std::cout, "crc32: {}\n", FileCrc(kServerExecPath));
 
     cvd::Response response;
     response.mutable_status()->set_code(cvd::Status::OK);

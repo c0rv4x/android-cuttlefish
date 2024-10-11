@@ -25,6 +25,7 @@
 #include <android-base/scopeguard.h>
 
 #include "common/libs/utils/contains.h"
+#include "common/libs/utils/files.h"
 #include "common/libs/utils/result.h"
 #include "common/libs/utils/subprocess.h"
 #include "common/libs/utils/users.h"
@@ -50,15 +51,15 @@ class CvdStopCommandHandler : public CvdServerHandler {
   CvdStopCommandHandler(InstanceManager& instance_manager,
                         HostToolTargetManager& host_tool_target_manager);
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override;
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override;
+  Result<bool> CanHandle(const CommandRequest& request) const override;
+  Result<cvd::Response> Handle(const CommandRequest& request) override;
   cvd_common::Args CmdList() const override;
   Result<std::string> SummaryHelp() const override;
   bool ShouldInterceptHelp() const override;
   Result<std::string> DetailedHelp(std::vector<std::string>&) const override;
 
  private:
-  Result<cvd::Response> HandleHelpCmd(const RequestWithStdio& request);
+  Result<cvd::Response> HandleHelpCmd(const CommandRequest& request);
   Result<std::string> GetBin(const std::string& host_artifacts_path) const;
   // whether the "bin" is cvd bins like stop_cvd or not (e.g. ln, ls, mkdir)
   // The information to fire the command might be different. This information
@@ -83,26 +84,26 @@ CvdStopCommandHandler::CvdStopCommandHandler(
       host_tool_target_manager_(host_tool_target_manager) {}
 
 Result<bool> CvdStopCommandHandler::CanHandle(
-    const RequestWithStdio& request) const {
-  auto invocation = ParseInvocation(request.Message());
+    const CommandRequest& request) const {
+  auto invocation = ParseInvocation(request);
   return Contains(CmdList(), invocation.command);
 }
 
 Result<cvd::Response> CvdStopCommandHandler::HandleHelpCmd(
-    const RequestWithStdio& request) {
-  auto [subcmd, cmd_args] = ParseInvocation(request.Message());
-  cvd_common::Envs envs = request.Envs();
+    const CommandRequest& request) {
+  auto [subcmd, cmd_args] = ParseInvocation(request);
+  const cvd_common::Envs& env = request.Env();
 
-  const auto [bin, bin_path] = CF_EXPECT(CvdHelpBinPath(subcmd, envs));
+  const auto [bin, bin_path] = CF_EXPECT(CvdHelpBinPath(subcmd, env));
 
   ConstructCommandParam construct_cmd_param{
       .bin_path = bin_path,
       .home = CF_EXPECT(SystemWideUserHome()),
       .args = cmd_args,
-      .envs = envs,
-      .working_dir = request.Message().command_request().working_directory(),
-      .command_name = bin,
-      .null_stdio = request.IsNullIo()};
+      .envs = env,
+      .working_dir = CurrentDirectory(),
+      .command_name = bin
+  };
   Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
 
   siginfo_t infop;
@@ -112,18 +113,17 @@ Result<cvd::Response> CvdStopCommandHandler::HandleHelpCmd(
 }
 
 Result<cvd::Response> CvdStopCommandHandler::Handle(
-    const RequestWithStdio& request) {
+    const CommandRequest& request) {
   CF_EXPECT(CanHandle(request));
-  auto [subcmd, cmd_args] = ParseInvocation(request.Message());
+  auto [subcmd, cmd_args] = ParseInvocation(request);
 
   if (CF_EXPECT(IsHelpSubcmd(cmd_args))) {
     return CF_EXPECT(HandleHelpCmd(request));
   }
 
   if (!CF_EXPECT(instance_manager_.HasInstanceGroups())) {
-    return CF_EXPECT(NoGroupResponse(request));
+    return NoGroupResponse(request);
   }
-  cvd_common::Envs envs = request.Envs();
   const auto selector_args = request.SelectorArgs();
 
   auto group = CF_EXPECT(SelectGroup(instance_manager_, request));
@@ -136,10 +136,10 @@ Result<cvd::Response> CvdStopCommandHandler::Handle(
       .bin_path = ConcatToString(android_host_out, "/bin/", bin),
       .home = group.HomeDir(),
       .args = cmd_args,
-      .envs = envs,
-      .working_dir = request.Message().command_request().working_directory(),
-      .command_name = bin,
-      .null_stdio = request.IsNullIo()};
+      .envs = request.Env(),
+      .working_dir = CurrentDirectory(),
+      .command_name = bin
+  };
   Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
 
   siginfo_t infop;

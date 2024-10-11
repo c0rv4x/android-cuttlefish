@@ -48,16 +48,16 @@ class CvdEnvCommandHandler : public CvdServerHandler {
   CvdEnvCommandHandler(InstanceManager& instance_manager)
       : instance_manager_{instance_manager}, cvd_env_operations_{"env"} {}
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return Contains(cvd_env_operations_, invocation.command);
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
     CF_EXPECT(CanHandle(request));
-    cvd_common::Envs envs = request.Envs();
+    const cvd_common::Envs& env = request.Env();
 
-    auto [_, subcmd_args] = ParseInvocation(request.Message());
+    auto [_, subcmd_args] = ParseInvocation(request);
 
     /*
      * cvd_env --help only. Not --helpxml, etc.
@@ -70,8 +70,8 @@ class CvdEnvCommandHandler : public CvdServerHandler {
     bool is_help = help_parse_result.ok() && (*help_parse_result);
 
     Command command =
-        is_help ? CF_EXPECT(HelpCommand(request, subcmd_args, envs))
-                : CF_EXPECT(NonHelpCommand(request, subcmd_args, envs));
+        is_help ? CF_EXPECT(HelpCommand(request, subcmd_args, env))
+                : CF_EXPECT(NonHelpCommand(request, subcmd_args, env));
 
     siginfo_t infop;
     command.Start().Wait(&infop, WEXITED);
@@ -93,7 +93,7 @@ class CvdEnvCommandHandler : public CvdServerHandler {
   }
 
  private:
-  Result<Command> HelpCommand(const RequestWithStdio& request,
+  Result<Command> HelpCommand(const CommandRequest& request,
                               const cvd_common::Args& subcmd_args,
                               const cvd_common::Envs& envs) {
     cvd_common::Envs envs_copy = envs;
@@ -102,7 +102,7 @@ class CvdEnvCommandHandler : public CvdServerHandler {
         ConstructCvdHelpCommand(kCvdEnvBin, envs_copy, subcmd_args, request));
   }
 
-  Result<Command> NonHelpCommand(const RequestWithStdio& request,
+  Result<Command> NonHelpCommand(const CommandRequest& request,
                                  const cvd_common::Args& subcmd_args,
                                  const cvd_common::Envs& envs) {
     const auto selector_args = request.SelectorArgs();

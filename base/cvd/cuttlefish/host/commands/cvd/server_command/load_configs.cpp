@@ -20,16 +20,16 @@
 #include <string>
 #include <vector>
 
-#include "common/libs/utils/contains.h"
 #include "common/libs/utils/files.h"
 #include "common/libs/utils/result.h"
 #include "host/commands/cvd/command_sequence.h"
 #include "host/commands/cvd/common_utils.h"
+#include "host/commands/cvd/fetch/fetch_cvd.h"
 #include "host/commands/cvd/instance_manager.h"
 #include "host/commands/cvd/interrupt_listener.h"
 #include "host/commands/cvd/parser/load_configs_parser.h"
 #include "host/commands/cvd/selector/selector_constants.h"
-#include "host/commands/cvd/server_client.h"
+#include "host/commands/cvd/command_request.h"
 #include "host/commands/cvd/server_command/utils.h"
 #include "host/commands/cvd/types.h"
 
@@ -52,10 +52,9 @@ Optionally fetches remote artifacts prior to launching the cuttlefish environmen
 The --override flag can be used to give new values for properties in the config file without needing to edit the file directly.  Convenient for one-off invocations.
 )";
 
-Result<CvdFlags> GetCvdFlags(const RequestWithStdio& request) {
-  auto args = ParseInvocation(request.Message()).arguments;
-  auto working_directory =
-      request.Message().command_request().working_directory();
+Result<CvdFlags> GetCvdFlags(const CommandRequest& request) {
+  auto args = ParseInvocation(request).arguments;
+  auto working_directory = CurrentDirectory();
   const LoadFlags flags = CF_EXPECT(GetFlags(args, working_directory));
   return CF_EXPECT(GetCvdFlags(flags));
 }
@@ -69,12 +68,12 @@ class LoadConfigsCommand : public CvdServerHandler {
       : executor_(executor), instance_manager_(instance_manager) {}
   ~LoadConfigsCommand() = default;
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return invocation.command == kLoadSubCmd;
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
     bool can_handle_request = CF_EXPECT(CanHandle(request));
     CF_EXPECT_EQ(can_handle_request, true);
 
@@ -84,8 +83,8 @@ class LoadConfigsCommand : public CvdServerHandler {
 
     std::mutex group_creation_mtx;
 
-    auto push_result =
-        PushInterruptListener([this, &group_home_directory, &group_creation_mtx](int) {
+    auto push_result = PushInterruptListener(
+        [this, &group_home_directory, &group_creation_mtx](int) {
           // Creating the listener before the group exists has a very low chance
           // that it may run before the group is actually created and fail,
           // that's fine. The alternative is having a very low chance of being
@@ -143,7 +142,7 @@ class LoadConfigsCommand : public CvdServerHandler {
     return response;
   }
 
-  Result<void> LoadGroup(const RequestWithStdio& request,
+  Result<void> LoadGroup(const CommandRequest& request,
                          selector::LocalInstanceGroup& group,
                          CvdFlags cvd_flags) {
     auto mkdir_res =
@@ -157,16 +156,19 @@ class LoadConfigsCommand : public CvdServerHandler {
 
     if (!cvd_flags.fetch_cvd_flags.empty()) {
       auto fetch_cmd = BuildFetchCmd(request, cvd_flags);
-      auto fetch_res = executor_.ExecuteOne(fetch_cmd, request.Err());
+      auto fetch_res = executor_.ExecuteOne(fetch_cmd, std::cerr);
       if (!fetch_res.ok()) {
         group.SetAllStates(cvd::INSTANCE_STATE_PREPARE_FAILED);
         instance_manager_.UpdateInstanceGroup(group);
       }
-      CF_EXPECT(std::move(fetch_res));
+      CF_EXPECTF(
+          std::move(fetch_res),
+          "Failed to fetch build artifacts, check {} for details",
+          GetFetchLogsFileName(cvd_flags.load_directories.target_directory));
     }
 
     auto launch_cmd = BuildLaunchCmd(request, cvd_flags, group);
-    CF_EXPECT(executor_.ExecuteOne(launch_cmd, request.Err()));
+    CF_EXPECT(executor_.ExecuteOne(launch_cmd, std::cerr));
     return {};
   }
 
@@ -180,72 +182,58 @@ class LoadConfigsCommand : public CvdServerHandler {
     return kDetailedHelpText;
   }
 
-  RequestWithStdio BuildFetchCmd(const RequestWithStdio& request,
+  CommandRequest BuildFetchCmd(const CommandRequest& request,
                                  const CvdFlags& cvd_flags) {
-    cvd::Request fetch_req;
-    auto& fetch_cmd = *fetch_req.mutable_command_request();
-    *fetch_cmd.mutable_env() = request.Message().command_request().env();
-    fetch_cmd.add_args("cvd");
-    fetch_cmd.add_args("fetch");
-    for (const auto& flag : cvd_flags.fetch_cvd_flags) {
-      fetch_cmd.add_args(flag);
-    }
-    return RequestWithStdio::InheritIo(std::move(fetch_req), request);
+    return CommandRequest()
+        .SetEnv(request.Env())
+        // The fetch operation is too verbose by default, set it to WARNING
+        // unconditionally, the full logs are available in fetch.log anyways.
+        .AddArguments({"cvd", "fetch", "-verbosity", "WARNING"})
+        .AddArguments(cvd_flags.fetch_cvd_flags);
   }
 
-  RequestWithStdio BuildLaunchCmd(const RequestWithStdio& request,
+  CommandRequest BuildLaunchCmd(const CommandRequest& request,
                                   const CvdFlags& cvd_flags,
                                   const selector::LocalInstanceGroup& group) {
-    cvd::Request launch_req;
-    auto& launch_cmd = *launch_req.mutable_command_request();
-    launch_cmd.set_working_directory(
-        cvd_flags.load_directories.host_package_directory);
-    *launch_cmd.mutable_env() = request.Message().command_request().env();
-    (*launch_cmd.mutable_env())["HOME"] =
-        cvd_flags.load_directories.launch_home_directory;
-    (*launch_cmd.mutable_env())[kAndroidHostOut] =
-        cvd_flags.load_directories.host_package_directory;
-    (*launch_cmd.mutable_env())[kAndroidSoongHostOut] =
-        cvd_flags.load_directories.host_package_directory;
-    if (Contains(*launch_cmd.mutable_env(), kAndroidProductOut)) {
-      (*launch_cmd.mutable_env()).erase(kAndroidProductOut);
-    }
-
-    /* cvd load will always create instances in daemon mode (to be independent
-     of terminal) and will enable reporting automatically (to run automatically
-     without question during launch)
-     */
-    launch_cmd.add_args("cvd");
-    // The newly created instances don't have an id yet, create will allocate
-    // those
-    launch_cmd.add_args("create");
-    launch_cmd.add_args("--daemon");
-
-    for (const auto& parsed_flag : cvd_flags.launch_cvd_flags) {
-      launch_cmd.add_args(parsed_flag);
-    }
     // Add system flag for multi-build scenario
-    launch_cmd.add_args(cvd_flags.load_directories.system_image_directory_flag);
+    std::string system_build_arg = fmt::format(
+        "--system_image_dir={}",
+        cvd_flags.load_directories.system_image_directory_flag_value);
+    CommandRequest launch_req =
+        CommandRequest()
+            .SetEnv(request.Env())
+            // The newly created instances don't have an id yet, create will
+            // allocate those.
+            /* cvd load will always create instances in daemon mode (to be
+             independent of terminal) and will enable reporting automatically
+             (to run automatically without question during launch)
+             */
+            .AddArguments({"cvd", "create", "--daemon", system_build_arg})
+            .AddArguments(cvd_flags.launch_cvd_flags)
+            .AddSelectorArguments(cvd_flags.selector_flags)
+            .AddSelectorArguments({"--group_name", group.GroupName()});
 
-    auto selector_opts = launch_cmd.mutable_selector_opts();
-
-    for (const auto& flag : cvd_flags.selector_flags) {
-      selector_opts->add_args(flag);
+    auto& env = launch_req.Env();
+    env["HOME"] = cvd_flags.load_directories.launch_home_directory;
+    env[kAndroidHostOut] = cvd_flags.load_directories.host_package_directory;
+    env[kAndroidSoongHostOut] =
+        cvd_flags.load_directories.host_package_directory;
+    if (Contains(env, kAndroidProductOut)) {
+      env.erase(kAndroidProductOut);
     }
 
-    // Make sure the newly created group is used by cvd start
-    launch_cmd.mutable_selector_opts()->add_args("--group_name");
-    launch_cmd.mutable_selector_opts()->add_args(group.GroupName());
-
-    return RequestWithStdio::InheritIo(std::move(launch_req), request);
+    return launch_req;
   }
 
  private:
   Result<selector::LocalInstanceGroup> CreateGroup(const CvdFlags& cvd_flags) {
     selector::GroupCreationInfo group_info{
         .home = cvd_flags.load_directories.launch_home_directory,
-        .host_artifacts_path = cvd_flags.load_directories.host_package_directory,
-        .group_name = cvd_flags.group_name? *cvd_flags.group_name: "",
+        .host_artifacts_path =
+            cvd_flags.load_directories.host_package_directory,
+        .product_out_path =
+            cvd_flags.load_directories.system_image_directory_flag_value,
+        .group_name = cvd_flags.group_name ? *cvd_flags.group_name : "",
     };
     for (const auto& instance_name : cvd_flags.instance_names) {
       group_info.instances.emplace_back(0, instance_name,

@@ -33,11 +33,11 @@ class CvdFetchCommandHandler : public CvdServerHandler {
   CvdFetchCommandHandler()
       : fetch_cmd_list_{std::vector<std::string>{"fetch", "fetch_cvd"}} {}
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override;
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override;
+  Result<bool> CanHandle(const CommandRequest& request) const override;
+  Result<cvd::Response> Handle(const CommandRequest& request) override;
   cvd_common::Args CmdList() const override { return fetch_cmd_list_; }
   Result<std::string> SummaryHelp() const override;
-  bool ShouldInterceptHelp() const  override { return true; }
+  bool ShouldInterceptHelp() const override { return true; }
   Result<std::string> DetailedHelp(std::vector<std::string>&) const override;
 
  private:
@@ -45,19 +45,19 @@ class CvdFetchCommandHandler : public CvdServerHandler {
 };
 
 Result<bool> CvdFetchCommandHandler::CanHandle(
-    const RequestWithStdio& request) const {
-  auto invocation = ParseInvocation(request.Message());
+    const CommandRequest& request) const {
+  auto invocation = ParseInvocation(request);
   return Contains(fetch_cmd_list_, invocation.command);
 }
 
 Result<cvd::Response> CvdFetchCommandHandler::Handle(
-    const RequestWithStdio& request) {
+    const CommandRequest& request) {
   CF_EXPECT(CanHandle(request));
 
   std::vector<std::string> args;
   args.emplace_back("fetch_cvd");
 
-  for (const auto& argument : ParseInvocation(request.Message()).arguments) {
+  for (const auto& argument : ParseInvocation(request).arguments) {
     args.emplace_back(argument);
   }
 

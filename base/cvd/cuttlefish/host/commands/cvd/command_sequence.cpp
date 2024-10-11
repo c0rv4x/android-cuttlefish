@@ -21,7 +21,7 @@
 
 #include "common/libs/fs/shared_buf.h"
 #include "host/commands/cvd/request_context.h"
-#include "host/commands/cvd/server_client.h"
+#include "host/commands/cvd/command_request.h"
 #include "host/commands/cvd/types.h"
 
 namespace cuttlefish {
@@ -48,17 +48,16 @@ std::string BashEscape(const std::string& input) {
   return safe ? input : "'" + StringReplace(input, "'", "\\'", true) + "'";
 }
 
-std::string FormattedCommand(const cvd::CommandRequest command) {
+std::string FormattedCommand(const CommandRequest& command) {
   std::stringstream effective_command;
   effective_command << "*******************************************************"
                        "*************************\n";
   effective_command << "Executing `";
-  for (const auto& [name, val] : command.env()) {
+  for (const auto& [name, val] : command.Env()) {
     effective_command << BashEscape(name) << "=" << BashEscape(val) << " ";
   }
-  auto args = cvd_common::ConvertToArgs(command.args());
-  auto selector_args =
-      cvd_common::ConvertToArgs(command.selector_opts().args());
+  auto args = command.Args();
+  auto selector_args = command.SelectorArgs();
   if (args.empty()) {
     return effective_command.str();
   }
@@ -83,14 +82,10 @@ CommandSequenceExecutor::CommandSequenceExecutor(
     : server_handlers_(server_handlers) {}
 
 Result<std::vector<cvd::Response>> CommandSequenceExecutor::Execute(
-    const std::vector<RequestWithStdio>& requests, std::ostream& report) {
+    const std::vector<CommandRequest>& requests, std::ostream& report) {
   std::vector<cvd::Response> responses;
   for (const auto& request : requests) {
-    auto& inner_proto = request.Message();
-    if (inner_proto.has_command_request()) {
-      auto& command = inner_proto.command_request();
-      report << FormattedCommand(command);
-    }
+    report << FormattedCommand(request);
 
     auto handler = CF_EXPECT(RequestHandler(request, server_handlers_));
     handler_stack_.push_back(handler);
@@ -106,7 +101,7 @@ Result<std::vector<cvd::Response>> CommandSequenceExecutor::Execute(
 }
 
 Result<cvd::Response> CommandSequenceExecutor::ExecuteOne(
-    const RequestWithStdio& request, std::ostream& report) {
+    const CommandRequest& request, std::ostream& report) {
   auto response_in_vector = CF_EXPECT(Execute({request}, report));
   CF_EXPECT_EQ(response_in_vector.size(), 1ul);
   return response_in_vector.front();
@@ -125,7 +120,7 @@ std::vector<std::string> CommandSequenceExecutor::CmdList() const {
 }
 
 Result<CvdServerHandler*> CommandSequenceExecutor::GetHandler(
-    const RequestWithStdio& request) {
+    const CommandRequest& request) {
   return CF_EXPECT(RequestHandler(request, server_handlers_));
 }
 

@@ -131,9 +131,99 @@ func (h *DockerHelper) RunContainer(img string, hostPort int) (string, error) {
 	return createRes.ID, nil
 }
 
+func (h *DockerHelper) PullLogs(id string) error {
+	// `TEST_UNDECLARED_OUTPUTS_DIR` env var is defined by bazel
+	// https://bazel.build/reference/test-encyclopedia#initial-conditions
+	val, ok := os.LookupEnv("TEST_UNDECLARED_OUTPUTS_DIR")
+	if !ok {
+		return errors.New("`TEST_UNDECLARED_OUTPUTS_DIR` was not found")
+	}
+	filename := filepath.Join(val, "container.log")
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	opts := types.ContainerLogsOptions{ShowStdout: true}
+	reader, err := h.client.ContainerLogs(ctx, id, opts)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, reader)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	return nil
+}
+
 func (h *DockerHelper) RemoveContainer(id string) error {
 	if err := h.client.ContainerRemove(context.TODO(), id, types.ContainerRemoveOptions{Force: true}); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (h *DockerHelper) StartADBServer(id, adbBin string) error {
+	return h.exec(id, []string{adbBin, "start-server"})
+}
+
+func (h *DockerHelper) ConnectADB(id, adbBin, serial string) error {
+	return h.exec(id, []string{adbBin, "connect", serial})
+}
+
+func (h *DockerHelper) ExecADBShellCommand(id, adbBin, serial string, cmd []string) error {
+	return h.exec(id, append([]string{adbBin, "-s", serial, "shell"}, cmd...))
+}
+
+type DockerExecExitCodeError struct {
+	ExitCode int
+}
+
+func (e DockerExecExitCodeError) Error() string {
+	return fmt.Sprintf("exit code: %d", e.ExitCode)
+}
+
+func (h *DockerHelper) exec(id string, cmd []string) error {
+	if err := h.runExec(id, cmd); err != nil {
+		return fmt.Errorf("docker exec %v failed: %w", cmd, err)
+	}
+	return nil
+}
+
+func (h *DockerHelper) runExec(id string, cmd []string) error {
+	ctx := context.TODO()
+	config := types.ExecConfig{
+		User:       "root",
+		Privileged: true,
+		Cmd:        cmd,
+	}
+	cExec, err := h.client.ContainerExecCreate(ctx, id, config)
+	if err != nil {
+		return err
+	}
+	if err = h.client.ContainerExecStart(ctx, cExec.ID, types.ExecStartCheck{}); err != nil {
+		return err
+	}
+	// ContainerExecStart does not block, short poll process status for 60 seconds to
+	// check when it has been completed. return a time out error otherwise.
+	cExecStatus := types.ContainerExecInspect{}
+	for i := 0; i < 30; i++ {
+		time.Sleep(500 * time.Millisecond)
+		cExecStatus, err = h.client.ContainerExecInspect(ctx, cExec.ID)
+		if err != nil {
+			return err
+		}
+		if !cExecStatus.Running {
+			break
+		}
+	}
+	if cExecStatus.Running {
+		return fmt.Errorf("command %v timed out", cmd)
+	}
+	if cExecStatus.ExitCode != 0 {
+		return &DockerExecExitCodeError{ExitCode: cExecStatus.ExitCode}
 	}
 	return nil
 }
@@ -143,6 +233,9 @@ func Cleanup(ctx *TestContext) {
 	if err != nil {
 		log.Printf("cleanup: failed creating docker helper: %s\n", err)
 		return
+	}
+	if err := dockerHelper.PullLogs(ctx.DockerContainerID); err != nil {
+		log.Printf("cleanup: failed pulling container logs: %s\n", err)
 	}
 	if err := dockerHelper.RemoveContainer(ctx.DockerContainerID); err != nil {
 		log.Printf("cleanup: failed removing container: %s\n", err)
@@ -209,6 +302,25 @@ func verifyZipFile(filename string) error {
 		rc.Close()
 		if readErr != nil {
 			return readErr
+		}
+	}
+	return nil
+}
+
+func VerifyLogsEndpoint(srvURL, group, name string) error {
+	base := fmt.Sprintf("%s/cvds/%s/%s/logs/", srvURL, group, name)
+	urls := []string{
+		base,
+		base + "launcher.log",
+		base + "kernel.log",
+	}
+	for _, v := range urls {
+		res, err := http.Get(v)
+		if err != nil {
+			return err
+		}
+		if res.StatusCode != http.StatusOK {
+			return fmt.Errorf("get %q failed with status code: %d", v, res.StatusCode)
 		}
 	}
 	return nil

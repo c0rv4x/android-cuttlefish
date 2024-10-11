@@ -26,6 +26,7 @@
 #include <fmt/format.h>
 
 #include "common/libs/utils/contains.h"
+#include "common/libs/utils/files.h"
 #include "common/libs/utils/subprocess.h"
 #include "common/libs/utils/users.h"
 #include "host/commands/cvd/common_utils.h"
@@ -63,22 +64,22 @@ class CvdDevicePowerCommandHandler : public CvdServerHandler {
     };
   }
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return Contains(cvd_power_operations_, invocation.command);
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
     CF_EXPECT(CanHandle(request));
-    cvd_common::Envs envs = request.Envs();
+    const cvd_common::Envs& env = request.Env();
 
-    auto [op, subcmd_args] = ParseInvocation(request.Message());
+    auto [op, subcmd_args] = ParseInvocation(request);
     bool is_help = CF_EXPECT(IsHelp(subcmd_args));
 
     // may modify subcmd_args by consuming in parsing
     Command command =
-        is_help ? CF_EXPECT(HelpCommand(request, op, subcmd_args, envs))
-                : CF_EXPECT(NonHelpCommand(request, op, subcmd_args, envs));
+        is_help ? CF_EXPECT(HelpCommand(request, op, subcmd_args, env))
+                : CF_EXPECT(NonHelpCommand(request, op, subcmd_args, env));
 
     siginfo_t infop;
     command.Start().Wait(&infop, WEXITED);
@@ -136,7 +137,7 @@ class CvdDevicePowerCommandHandler : public CvdServerHandler {
     return powerbtn_bin;
   }
 
-  Result<Command> HelpCommand(const RequestWithStdio& request,
+  Result<Command> HelpCommand(const CommandRequest& request,
                               const std::string& op,
                               const cvd_common::Args& subcmd_args,
                               cvd_common::Envs envs) {
@@ -153,15 +154,15 @@ class CvdDevicePowerCommandHandler : public CvdServerHandler {
         .bin_path = cvd_power_bin_path,
         .home = home,
         .args = subcmd_args,
-        .envs = envs,
-        .working_dir = request.Message().command_request().working_directory(),
-        .command_name = bin_base,
-        .null_stdio = request.IsNullIo()};
+        .envs = std::move(envs),
+        .working_dir = CurrentDirectory(),
+        .command_name = bin_base
+    };
     Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
     return command;
   }
 
-  Result<Command> NonHelpCommand(const RequestWithStdio& request,
+  Result<Command> NonHelpCommand(const CommandRequest& request,
                                  const std::string& op,
                                  cvd_common::Args& subcmd_args,
                                  cvd_common::Envs envs) {
@@ -197,16 +198,16 @@ class CvdDevicePowerCommandHandler : public CvdServerHandler {
     for (const auto& arg : cvd_env_args) {
       command_to_issue << arg << " ";
     }
-    request.Err() << command_to_issue.str();
+    std::cerr << command_to_issue.str();
 
     ConstructCommandParam construct_cmd_param{
         .bin_path = cvd_power_bin_path,
         .home = home,
         .args = cvd_env_args,
-        .envs = envs,
-        .working_dir = request.Message().command_request().working_directory(),
-        .command_name = bin_base,
-        .null_stdio = request.IsNullIo()};
+        .envs = std::move(envs),
+        .working_dir = CurrentDirectory(),
+        .command_name = bin_base
+    };
     Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
     return command;
   }

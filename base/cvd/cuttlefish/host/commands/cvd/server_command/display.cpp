@@ -23,8 +23,8 @@
 #include <string>
 #include <vector>
 
-#include "common/libs/fs/shared_buf.h"
 #include "common/libs/utils/contains.h"
+#include "common/libs/utils/files.h"
 #include "common/libs/utils/subprocess.h"
 #include "common/libs/utils/users.h"
 #include "host/commands/cvd/common_utils.h"
@@ -58,22 +58,22 @@ class CvdDisplayCommandHandler : public CvdServerHandler {
       : instance_manager_{instance_manager},
         cvd_display_operations_{"display"} {}
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return Contains(cvd_display_operations_, invocation.command);
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
     CF_EXPECT(CanHandle(request));
-    cvd_common::Envs envs = request.Envs();
+    const cvd_common::Envs& env = request.Env();
 
-    auto [_, subcmd_args] = ParseInvocation(request.Message());
+    auto [_, subcmd_args] = ParseInvocation(request);
 
     bool is_help = CF_EXPECT(IsHelp(subcmd_args));
     // may modify subcmd_args by consuming in parsing
     Command command =
-        is_help ? CF_EXPECT(HelpCommand(request, subcmd_args, envs))
-                : CF_EXPECT(NonHelpCommand(request, subcmd_args, envs));
+        is_help ? CF_EXPECT(HelpCommand(request, subcmd_args, env))
+                : CF_EXPECT(NonHelpCommand(request, subcmd_args, env));
 
     siginfo_t infop;
     command.Start().Wait(&infop, WEXITED);
@@ -95,7 +95,7 @@ class CvdDisplayCommandHandler : public CvdServerHandler {
   }
 
  private:
-  Result<Command> HelpCommand(const RequestWithStdio& request,
+  Result<Command> HelpCommand(const CommandRequest& request,
                               const cvd_common::Args& subcmd_args,
                               cvd_common::Envs envs) {
     auto android_host_out = CF_EXPECT(AndroidHostPath(envs));
@@ -110,15 +110,15 @@ class CvdDisplayCommandHandler : public CvdServerHandler {
         .bin_path = cvd_display_bin_path,
         .home = home,
         .args = subcmd_args,
-        .envs = envs,
-        .working_dir = request.Message().command_request().working_directory(),
-        .command_name = kDisplayBin,
-        .null_stdio = request.IsNullIo()};
+        .envs = std::move(envs),
+        .working_dir = CurrentDirectory(),
+        .command_name = kDisplayBin
+    };
     Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
     return command;
   }
 
-  Result<Command> NonHelpCommand(const RequestWithStdio& request,
+  Result<Command> NonHelpCommand(const CommandRequest& request,
                                  cvd_common::Args& subcmd_args,
                                  cvd_common::Envs envs) {
     // test if there is --instance_num flag
@@ -147,21 +147,21 @@ class CvdDisplayCommandHandler : public CvdServerHandler {
     envs[kAndroidSoongHostOut] = android_host_out;
 
     std::stringstream command_to_issue;
-    request.Err() << "HOME=" << home << " " << kAndroidHostOut << "="
+    std::cerr << "HOME=" << home << " " << kAndroidHostOut << "="
                   << android_host_out << " " << kAndroidSoongHostOut << "="
                   << android_host_out << " " << cvd_display_bin_path << " ";
     for (const auto& arg : cvd_env_args) {
-      request.Err() << arg << " ";
+      std::cerr << arg << " ";
     }
 
     ConstructCommandParam construct_cmd_param{
         .bin_path = cvd_display_bin_path,
         .home = home,
         .args = cvd_env_args,
-        .envs = envs,
-        .working_dir = request.Message().command_request().working_directory(),
-        .command_name = kDisplayBin,
-        .null_stdio = request.IsNullIo()};
+        .envs = std::move(envs),
+        .working_dir = CurrentDirectory(),
+        .command_name = kDisplayBin
+    };
     Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
     return command;
   }

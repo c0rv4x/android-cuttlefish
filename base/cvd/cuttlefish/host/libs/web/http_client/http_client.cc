@@ -51,7 +51,7 @@ int LoggingCurlDebugFunction(CURL*, curl_infotype type, char* data, size_t size,
   switch (type) {
     case CURLINFO_TEXT:
       LOG(VERBOSE) << "CURLINFO_TEXT ";
-      LOG(INFO) << ScrubSecrets(TrimWhitespace(data, size));
+      LOG(DEBUG) << ScrubSecrets(TrimWhitespace(data, size));
       break;
     case CURLINFO_HEADER_IN:
       LOG(VERBOSE) << "CURLINFO_HEADER_IN ";
@@ -70,6 +70,8 @@ int LoggingCurlDebugFunction(CURL*, curl_infotype type, char* data, size_t size,
     case CURLINFO_SSL_DATA_OUT:
       break;
     case CURLINFO_END:
+      LOG(VERBOSE) << "CURLINFO_END ";
+      LOG(DEBUG) << ScrubSecrets(TrimWhitespace(data, size));
       break;
     default:
       LOG(ERROR) << "Unexpected cURL output type: " << type;
@@ -170,11 +172,12 @@ class CurlClient : public HttpClient {
   Result<HttpResponse<std::string>> DownloadToFile(
       const std::string& url, const std::string& path,
       const std::vector<std::string>& headers) override {
-    LOG(INFO) << "Attempting to save \"" << url << "\" to \"" << path << "\"";
+    LOG(DEBUG) << "Attempting to save \"" << url << "\" to \"" << path << "\"";
 
     auto [shared_fd, temp_path] = CF_EXPECT(SharedFD::Mkostemp(path));
     SharedFDOstream stream(shared_fd);
     auto callback = [&stream](char* data, size_t size) -> bool {
+      LOG(DEBUG) << "Downloaded chunk of " << size << " bytes";
       if (data == nullptr) {
         return !stream.fail();
       }
@@ -209,7 +212,7 @@ class CurlClient : public HttpClient {
     if (!resolver_) {
       return ManagedCurlSlist(nullptr, curl_slist_free_all);
     }
-    LOG(INFO) << "Manually resolving \"" << url_str << "\"";
+    LOG(DEBUG) << "Manually resolving \"" << url_str << "\"";
     std::stringstream resolve_line;
     std::unique_ptr<CURLU, decltype(&curl_url_cleanup)> url(curl_url(),
                                                             curl_url_cleanup);

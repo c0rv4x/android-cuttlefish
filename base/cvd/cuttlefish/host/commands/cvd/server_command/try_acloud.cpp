@@ -63,8 +63,8 @@ class TryAcloudCommand : public CvdServerHandler {
   TryAcloudCommand(InstanceManager& im) : instance_manager_(im) {}
   ~TryAcloudCommand() = default;
 
-  Result<bool> CanHandle(const RequestWithStdio& request) const override {
-    auto invocation = ParseInvocation(request.Message());
+  Result<bool> CanHandle(const CommandRequest& request) const override {
+    auto invocation = ParseInvocation(request);
     return invocation.command == "try-acloud";
   }
 
@@ -78,7 +78,7 @@ class TryAcloudCommand : public CvdServerHandler {
     return kDetailedHelpText;
   }
 
-  Result<cvd::Response> Handle(const RequestWithStdio& request) override {
+  Result<cvd::Response> Handle(const CommandRequest& request) override {
 #if ENABLE_CVDR_TRANSLATION
     auto res = VerifyWithCvdRemote(request);
     return res.ok() ? res : VerifyWithCvd(request);
@@ -87,15 +87,15 @@ class TryAcloudCommand : public CvdServerHandler {
   }
 
  private:
-  Result<cvd::Response> VerifyWithCvd(const RequestWithStdio& request);
-  Result<cvd::Response> VerifyWithCvdRemote(const RequestWithStdio& request);
+  Result<cvd::Response> VerifyWithCvd(const CommandRequest& request);
+  Result<cvd::Response> VerifyWithCvdRemote(const CommandRequest& request);
   Result<std::string> RunCvdRemoteGetConfig(const std::string& name);
 
   InstanceManager& instance_manager_;
 };
 
 Result<cvd::Response> TryAcloudCommand::VerifyWithCvd(
-    const RequestWithStdio& request) {
+    const CommandRequest& request) {
   CF_EXPECT(CanHandle(request));
   CF_EXPECT(IsSubOperationSupported(request));
   // ConvertAcloudCreate converts acloud to cvd commands.
@@ -103,7 +103,7 @@ Result<cvd::Response> TryAcloudCommand::VerifyWithCvd(
   // currently, optout/optin feature only works in local instance
   // remote instance would continue to be done either through `python acloud` or
   // `cvdr` (if enabled).
-  auto optout = CF_EXPECT(instance_manager_.GetAcloudTranslatorOptout());
+  auto optout = true; // CF_EXPECT(instance_manager_.GetAcloudTranslatorOptout());
   CF_EXPECT(!optout);
   cvd::Response response;
   response.mutable_command_response();
@@ -111,12 +111,12 @@ Result<cvd::Response> TryAcloudCommand::VerifyWithCvd(
 }
 
 Result<cvd::Response> TryAcloudCommand::VerifyWithCvdRemote(
-    const RequestWithStdio& request) {
+    const CommandRequest& request) {
   auto filename = CF_EXPECT(GetDefaultConfigFile());
   auto config = CF_EXPECT(LoadAcloudConfig(filename));
   CF_EXPECT(config.use_legacy_acloud == false);
   CF_EXPECT(CheckIfCvdrExist());
-  auto args = ParseInvocation(request.Message()).arguments;
+  auto args = ParseInvocation(request).arguments;
   CF_EXPECT(acloud_impl::CompileFromAcloudToCvdr(args));
   std::string cvdr_service_url =
       CF_EXPECT(RunCvdRemoteGetConfig("service_url"));

@@ -18,7 +18,6 @@
 
 #include <cctype>
 #include <map>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -26,11 +25,9 @@
 #include <android-base/strings.h>
 #include <fmt/core.h>
 
-#include "common/libs/fs/shared_buf.h"
-#include "common/libs/utils/files.h"
 #include "cuttlefish/host/commands/cvd/cvd_server.pb.h"
 #include "cuttlefish/host/commands/cvd/selector/cvd_persistent_data.pb.h"
-#include "host/commands/cvd/common_utils.h"
+#include "common/libs/utils/files.h"
 #include "host/commands/cvd/flag.h"
 #include "host/commands/cvd/selector/instance_group_record.h"
 #include "host/commands/cvd/server_command/utils.h"
@@ -99,7 +96,7 @@ void OverrideInstanceJson(const selector::LocalInstanceGroup& group,
 }  // namespace
 
 Result<StatusFetcherOutput> StatusFetcher::FetchOneInstanceStatus(
-    const RequestWithStdio& request,
+    const CommandRequest& request,
     const InstanceManager::LocalInstanceGroup& group, cvd::Instance& instance) {
   // Only running instances are capable of responding to status requests. An
   // unreachable instance is also considered running, it just didnt't reply last
@@ -120,22 +117,21 @@ Result<StatusFetcherOutput> StatusFetcher::FetchOneInstanceStatus(
     };
   }
 
-  auto [subcmd, cmd_args] = ParseInvocation(request.Message());
+  auto [subcmd, cmd_args] = ParseInvocation(request);
 
   // remove --all_instances if there is
   bool all_instances = false;
   CF_EXPECT(ConsumeFlags({GflagsCompatFlag("all_instances", all_instances)},
                          cmd_args));
 
-  const auto working_dir =
-      request.Message().command_request().working_directory();
+  const auto working_dir = CurrentDirectory();
 
   auto android_host_out = group.Proto().host_artifacts_path();
   auto home = group.Proto().home_directory();
   auto bin = CF_EXPECT(GetBin(android_host_out));
   auto bin_path = fmt::format("{}/bin/{}", android_host_out, bin);
 
-  cvd_common::Envs envs = request.Envs();
+  cvd_common::Envs envs = request.Env();
   envs["HOME"] = home;
   // old cvd_internal_status expects CUTTLEFISH_INSTANCE=<k>
   envs[kCuttlefishInstanceEnvVarName] = std::to_string(instance.id());
@@ -145,8 +141,8 @@ Result<StatusFetcherOutput> StatusFetcher::FetchOneInstanceStatus(
                                             .args = cmd_args,
                                             .envs = envs,
                                             .working_dir = working_dir,
-                                            .command_name = bin,
-                                            .null_stdio = request.IsNullIo()};
+                                            .command_name = bin
+  };
   Command command = CF_EXPECT(ConstructCommand(construct_cmd_param));
 
   std::string serialized_json;
@@ -197,9 +193,9 @@ Result<StatusFetcherOutput> StatusFetcher::FetchOneInstanceStatus(
 }
 
 Result<StatusFetcherOutput> StatusFetcher::FetchStatus(
-    const RequestWithStdio& request) {
-  cvd_common::Envs envs = request.Envs();
-  auto [subcmd, cmd_args] = ParseInvocation(request.Message());
+    const CommandRequest& request) {
+  const cvd_common::Envs& env = request.Env();
+  auto [subcmd, cmd_args] = ParseInvocation(request);
 
   // find group
   const auto selector_args = request.SelectorArgs();
@@ -207,11 +203,11 @@ Result<StatusFetcherOutput> StatusFetcher::FetchStatus(
   auto all_instances_opt = CF_EXPECT(all_instances_flag.FilterFlag(cmd_args));
 
   auto instance_group =
-      CF_EXPECT(instance_manager_.SelectGroup(selector_args, envs));
+      CF_EXPECT(instance_manager_.SelectGroup(selector_args, env));
 
   std::vector<cvd::Instance> instances;
   auto instance_record_result =
-      instance_manager_.SelectInstance(selector_args, envs);
+      instance_manager_.SelectInstance(selector_args, env);
 
   bool status_the_group_flag = all_instances_opt && *all_instances_opt;
   if (instance_record_result.ok() && !status_the_group_flag) {
@@ -249,20 +245,18 @@ Result<StatusFetcherOutput> StatusFetcher::FetchStatus(
 }
 
 Result<Json::Value> StatusFetcher::FetchGroupStatus(
-    const RequestWithStdio& original_request,
+    const CommandRequest& original_request,
     selector::LocalInstanceGroup& group) {
   Json::Value group_json(Json::objectValue);
   group_json["group_name"] = group.GroupName();
   group_json["start_time"] = selector::Format(group.StartTime());
 
-  auto request_message = MakeRequest(
-      {.cmd_args = {"cvd", "status", "--print", "--all_instances"},
-       .env = original_request.Envs(),
-       .selector_args = {"--group_name", group.GroupName()},
-       .working_dir =
-           original_request.Message().command_request().working_directory()});
-  RequestWithStdio group_request =
-      RequestWithStdio::InheritIo(std::move(request_message), original_request);
+  CommandRequest group_request =
+      CommandRequest()
+          .AddArguments({"cvd", "status", "--print", "--all_instances"})
+          .SetEnv(original_request.Env())
+          .AddSelectorArguments({"--group_name", group.GroupName()});
+
   auto [_, instances_json, group_response] =
       CF_EXPECT(FetchStatus(group_request));
   group_json["instances"] = instances_json;

@@ -20,8 +20,8 @@
 
 #include <cstdio>
 #include <set>
-#include <string_view>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <android-base/file.h>
@@ -51,6 +51,7 @@ namespace {
 constexpr std::string_view kOverrideSeparator = ":";
 constexpr std::string_view kCredentialSourceOverride =
     "fetch.credential_source";
+constexpr std::string_view kProjectIDOverride = "fetch.project_id";
 
 bool IsLocalBuild(std::string path) {
   return android::base::StartsWith(path, "/");
@@ -161,6 +162,8 @@ std::vector<Flag> GetFlagsVector(LoadFlags& load_flags) {
   flags.emplace_back(
       GflagsCompatFlag("credential_source", load_flags.credential_source));
   flags.emplace_back(
+      GflagsCompatFlag("project_id", load_flags.project_id));
+  flags.emplace_back(
       GflagsCompatFlag("base_directory", load_flags.base_dir)
           .Help("Parent directory for artifacts and runtime files. Defaults to "
                 "/tmp/cvd/<uid>/<timestamp>."));
@@ -267,8 +270,7 @@ Result<LoadDirectories> GenerateLoadDirectories(
         result.target_directory + "/" + kHostToolsSubdirectory;
   }
 
-  result.system_image_directory_flag =
-      "--system_image_dir=" +
+  result.system_image_directory_flag_value =
       android::base::Join(system_image_directories, ',');
   return result;
 }
@@ -298,17 +300,18 @@ std::vector<std::string> FillEmptyInstanceNames(
 
 Result<CvdFlags> ParseCvdConfigs(const EnvironmentSpecification& launch,
                                  const LoadDirectories& load_directories) {
-  CvdFlags flags{.launch_cvd_flags = CF_EXPECT(ParseLaunchCvdConfigs(launch)),
-                  .selector_flags = ParseSelectorConfigs(launch),
-                  .fetch_cvd_flags = CF_EXPECT(ParseFetchCvdConfigs(
-                      launch, load_directories.target_directory,
-                      load_directories.target_subdirectories)),
-                  .load_directories = load_directories,
+  CvdFlags flags{
+      .launch_cvd_flags = CF_EXPECT(ParseLaunchCvdConfigs(launch)),
+      .selector_flags = ParseSelectorConfigs(launch),
+      .fetch_cvd_flags = CF_EXPECT(
+          ParseFetchCvdConfigs(launch, load_directories.target_directory,
+                               load_directories.target_subdirectories)),
+      .load_directories = load_directories,
   };
   if (launch.common().has_group_name()) {
     flags.group_name = launch.common().group_name();
   }
-  for (const auto& instance: launch.instances()) {
+  for (const auto& instance : launch.instances()) {
     flags.instance_names.push_back(instance.name());
   }
   flags.instance_names =
@@ -351,6 +354,17 @@ Result<LoadFlags> GetFlags(std::vector<std::string>& args,
     load_flags.overrides.emplace_back(
         Override{.config_path = std::string(kCredentialSourceOverride),
                  .new_value = load_flags.credential_source});
+  }
+  if (!load_flags.project_id.empty()){
+    for (const auto& flag : load_flags.overrides) {
+      CF_EXPECT(!android::base::StartsWith(flag.config_path,
+                                           kProjectIDOverride),
+                "Specifying both --override=fetch.project_id and the "
+                "--project_id flag is not allowed.");
+    }
+    load_flags.overrides.emplace_back(
+        Override{.config_path = std::string(kProjectIDOverride),
+                 .new_value = load_flags.project_id});
   }
   return load_flags;
 }
