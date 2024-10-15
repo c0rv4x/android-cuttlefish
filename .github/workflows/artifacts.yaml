@@ -76,8 +76,8 @@ jobs:
   export-docker-image-arm64:
     runs-on: arm-ubuntu-arm-22.04-4core
     container:
-      image: arm64v8/ubuntu:22.04  # Specify an arm64 Docker image here
-      options: --security-opt=no-new-privileges  # Optional: Add additional Docker security options
+      image: arm64v8/ubuntu:22.04
+      options: --security-opt=no-new-privileges
     steps:
     - name: Checkout repository
       uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # aka v2
