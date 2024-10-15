@@ -21,8 +21,8 @@ jobs:
       image: arm64v8/ubuntu:22.04
       options: --security-opt=no-new-privileges
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # aka v2
+    # - name: Checkout repository
+    #   uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # aka v2
     - name: Install dependencies
       run: |
         apt-get update && apt-get install -y sudo curl gnupg2 apt-transport-https ca-certificates software-properties-common
