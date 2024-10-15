@@ -8,49 +8,30 @@ on:
     branches:
       - main
 jobs:
-
   export-docker-image-arm64:
     runs-on: ubuntu-latest
-    services:
-      docker:
-        image: docker:20.10.24-dind
-        options: --privileged # Required for Docker to function inside a container
-        ports:
-          - 2375:2375 # Expose the Docker socket
-    container:
-      image: arm64v8/ubuntu:22.04
-      options: --security-opt=no-new-privileges
     steps:
-    # - name: Checkout repository
-    #   uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # aka v2
-    - name: Install dependencies
-      run: |
-        apt-get update && apt-get install -y sudo curl gnupg2 apt-transport-https ca-certificates software-properties-common
-    - name: Install Docker CLI
-      run: |
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-        sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-    - name: Configure Docker Daemon
-      run: |
-        echo '{"experimental":true,"insecure-registries":["localhost:5000"]}' | sudo tee /etc/docker/daemon.json
-        sudo systemctl restart docker
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
     - name: Get docker image name
       run: |
         short_sha=$(echo ${{ github.sha }} | cut -c1-8)
         echo "arm64_image_path=orchestration-image-arm64-${short_sha}.tar" >> $GITHUB_ENV
+
     - name: Install bazel
       run: sudo bash tools/buildutils/installbazel.sh
-    - name: bazel version
-      run: bazel version
-    - name: Build docker image
-      env:
-        DOCKER_HOST: tcp://localhost:2375 # Point Docker CLI to the Docker service
+
+    - name: Build and save Docker image
       run: |
-        bazel build --sandbox_writable_path=$HOME //docker:orchestration_image_tar
-        mv bazel-bin/docker/orchestration-image.tar ${{ env.arm64_image_path }}
+        # Build the Docker image for arm64 architecture
+        docker buildx build --platform linux/arm64 -t orchestration-image-arm64 --output type=docker,dest=${{ env.arm64_image_path }} .
+
     - name: Publish docker image
-      uses: actions/upload-artifact@c7d193f32edcb7bfad88892161225aeda64e9392 # aka v4.0.0
+      uses: actions/upload-artifact@v4
       with:
         name: docker-image-arm64
         path: ${{ env.arm64_image_path }}
