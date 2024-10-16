@@ -15,7 +15,7 @@ else
 fi
 
 # Specify the platforms for the build
-platforms="linux/amd64,linux/arm64"
+platforms="linux/arm64"
 
 # Set up Docker Buildx if not already set up
 docker buildx create --use || true
