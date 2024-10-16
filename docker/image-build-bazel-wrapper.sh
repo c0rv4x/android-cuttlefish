@@ -19,6 +19,7 @@
 set -euo pipefail
 if [[ ! -d "${RUNFILES_DIR:-/dev/null}" && ! -f "${RUNFILES_MANIFEST_FILE:-/dev/null}" ]]; then
   echo 44444
+  echo $0
   if [[ -f "$0.runfiles_manifest" ]]; then
     export RUNFILES_MANIFEST_FILE="$0.runfiles_manifest"
   elif [[ -f "$0.runfiles/MANIFEST" ]]; then
