@@ -42,6 +42,7 @@ usage() {
 }
 
 output=
+echo 123412341234
 
 while getopts ":ho:" opt; do
   case "${opt}" in
@@ -64,12 +65,14 @@ while getopts ":ho:" opt; do
       ;;
   esac
 done
+echo 123412341234
 
 rlocation_base="_main"
 
 if [[ $(runfiles_current_repository) ]]; then
   rlocation_base="_main/external/$(runfiles_current_repository)"
 fi
+echo 123412341234
 
 script_location="$(rlocation ${rlocation_base}/docker/image-build-bazel-wrapper.sh)"
 repo_root_dir=$(dirname $(dirname $(readlink -f ${script_location})))
@@ -82,7 +85,7 @@ function remove_image() {
 }
 
 trap remove_image EXIT
-
+echo 123412341234
 # Build docker image
 ${repo_root_dir}/docker/image-builder.sh "${name}"
 
