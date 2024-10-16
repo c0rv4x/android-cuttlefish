@@ -14,24 +14,29 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    # Set up Docker Buildx for multi-platform builds
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Get docker image name
+    # Install Bazel dependencies
+    - name: Install dependencies
       run: |
-        short_sha=$(echo ${{ github.sha }} | cut -c1-8)
-        echo "arm64_image_path=orchestration-image-arm64-${short_sha}.tar" >> $GITHUB_ENV
+        apt-get update && apt-get install -y sudo curl gnupg2 apt-transport-https ca-certificates software-properties-common
 
-    - name: Install bazel
+    - name: Install Bazel
       run: sudo bash tools/buildutils/installbazel.sh
 
-    - name: Build and save Docker image
-      run: |
-        # Build the Docker image for arm64 architecture
-        docker buildx build --platform linux/arm64 -t orchestration-image-arm64 --output type=docker,dest=${{ env.arm64_image_path }} .
+    - name: Bazel version
+      run: bazel version
 
+    # Build docker image using Buildx
+    - name: Build docker image with Buildx
+      run: |
+        ./docker/image-build-bazel-wrapper.sh
+
+    # Upload Docker image as artifact
     - name: Publish docker image
       uses: actions/upload-artifact@v4
       with:
         name: docker-image-arm64
-        path: ${{ env.arm64_image_path }}
+        path: orchestration-image-arm64-${{ github.sha }}.tar
