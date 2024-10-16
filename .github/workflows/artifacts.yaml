@@ -12,31 +12,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
-
-    # Set up Docker Buildx for multi-platform builds
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-
-    # Install Bazel dependencies
-    - name: Install dependencies
+      uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675 # aka v2
+    - name: Get docker image name
       run: |
-        sudo apt-get update && sudo apt-get install -y curl gnupg2 apt-transport-https ca-certificates software-properties-common
-
-    - name: Install Bazel
+        short_sha=$(echo ${{ github.sha }} | cut -c1-8)
+        echo "arm64_image_path=orchestration-image-arm64-${short_sha}.tar" >> $GITHUB_ENV
+    - name: Install bazel
       run: sudo bash tools/buildutils/installbazel.sh
-
-    - name: Bazel version
+    - name: bazel version
       run: bazel version
-
-    # Build docker image using Buildx
-    - name: Build docker image with Buildx
-      run: |
-        ./docker/image-build-bazel-wrapper.sh
-
-    # Upload Docker image as artifact
+    - name: Build docker image
+      run: bazel build --sandbox_writable_path=$HOME //docker:orchestration_image_tar
+    - name: Set filename of docker image
+      run: mv bazel-bin/docker/orchestration-image.tar ${{ env.arm64_image_path }}
     - name: Publish docker image
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@c7d193f32edcb7bfad88892161225aeda64e9392 # aka v4.0.0
       with:
         name: docker-image-arm64
-        path: orchestration-image-arm64-${{ github.sha }}.tar
+        path: ${{ env.arm64_image_path }}
