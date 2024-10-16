@@ -18,6 +18,7 @@
 # Copy-pasted from Bazel's Bash runfiles library (tools/bash/runfiles/runfiles.bash).
 set -euo pipefail
 if [[ ! -d "${RUNFILES_DIR:-/dev/null}" && ! -f "${RUNFILES_MANIFEST_FILE:-/dev/null}" ]]; then
+  echo 44444
   if [[ -f "$0.runfiles_manifest" ]]; then
     export RUNFILES_MANIFEST_FILE="$0.runfiles_manifest"
   elif [[ -f "$0.runfiles/MANIFEST" ]]; then
@@ -27,8 +28,12 @@ if [[ ! -d "${RUNFILES_DIR:-/dev/null}" && ! -f "${RUNFILES_MANIFEST_FILE:-/dev/
   fi
 fi
 if [[ -f "${RUNFILES_DIR:-/dev/null}/bazel_tools/tools/bash/runfiles/runfiles.bash" ]]; then
+  echo 5555
+
   source "${RUNFILES_DIR}/bazel_tools/tools/bash/runfiles/runfiles.bash"
 elif [[ -f "${RUNFILES_MANIFEST_FILE:-/dev/null}" ]]; then
+  echo 66666
+
   source "$(grep -m1 "^bazel_tools/tools/bash/runfiles/runfiles.bash " \
             "$RUNFILES_MANIFEST_FILE" | cut -d ' ' -f 2-)"
 else
