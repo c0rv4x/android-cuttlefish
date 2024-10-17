@@ -27,5 +27,6 @@ docker buildx build \
     --force-rm \
     --no-cache \
     -f docker/Dockerfile \
-    -t "$tag" .
+    -t "$tag" 
+    --load .
 popd
