@@ -64,6 +64,8 @@ jobs:
       run: sudo bash tools/buildutils/installbazel.sh
     - name: bazel version
       run: bazel version
+    - name: Set platform to amd64
+      run: echo "PLATFORM=linux/amd64" >> $GITHUB_ENV
     - name: Build docker image
       run: bazel build --sandbox_writable_path=$HOME //docker:orchestration_image_tar
     - name: Set filename of docker image
@@ -86,6 +88,8 @@ jobs:
       run: sudo bash tools/buildutils/installbazel.sh
     - name: bazel version
       run: bazel version
+    - name: Set platform to arm64
+      run: echo "PLATFORM=linux/arm64" >> $GITHUB_ENV
     - name: Build docker image
       run: bazel build --sandbox_writable_path=$HOME //docker:orchestration_image_tar
     - name: Set filename of docker image
